@@ -65,19 +65,23 @@ class HonestyBasedAlgorithm:
         Returns:
             Array of honesty coefficinets
         """
-        P = np.array(swarm_data.T) # Transpose to match matrix format in the paper
-
-        # Perform LU decomposition
-        L, U = self.perform_lu_decomposition(P)
-
-        # Solve Ly = P (equation 13)
-        y = np.linalg.solve(L, virtual_collector)
-
-        # Solve Uk = y (equation 14)
-        k = np.linalg.solve(U,y)
-
-        return k
-
+        try:
+            P = np.array(swarm_data.T)
+        
+            # Add small noise to prevent singularity
+            P += np.random.normal(0, 1e-8, P.shape)
+            
+            # More robust decomposition method
+            L, U = np.linalg.qr(P)
+            
+            # Solve with more numerical stability
+            y = np.linalg.lstsq(L, virtual_collector, rcond=None)[0]
+            k = np.linalg.lstsq(U, y, rcond=None)[0]
+            
+            return k
+        except Exception as e:
+            print(f"Honesty coefficient calculation error: {e}")
+            return np.ones(swarm_data.shape[0])
     def detect_anomalies(self, meter_data, swarm_size_range=(5, 10)):
         """
         Detect anomalous meters using HBA

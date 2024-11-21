@@ -3,114 +3,130 @@ import numpy as np
 from hba import HonestyBasedAlgorithm
 from kba import KLDBasedAlgorithm
 from vba import VectorBasedAlgorithm
-
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sentence_transformers import SentenceTransformer
+import torch
 
 
 def prepare_data_for_anomaly_detection(df):
     """
-    Prepare dataset for anomaly detection by converting text features
+    Prepare dataset for anomaly detection by creating features 
+    that capture the semantic relationship between text and label
 
     Args:
-        df: Input DataFrame
+        df: Input DataFrame with 'text' and 'label' columns
 
     Returns:
-        Processed DataFrame suitable for anomaly detection
+        DataFrame with features for anomaly detection
     """
-    # Convert text features to numerical representations
-    # Use text length and word count as basic features
-    df['title_length'] = df['text'].str.len()
-    df['text_length'] = df['text'].str.len()
-    df['word_count'] = df['text'].str.split().str.len()
+    # Use sentence transformers for semantic embedding
+    model = SentenceTransformer('all-MiniLM-L6-v2')
+    
+    # Generate embeddings for text
+    text_embeddings = model.encode(df['text'].tolist())
+    
+    # One-hot encode labels
+    label_mapping = {0: 'World', 1: 'Sports', 2: 'Business', 3: 'Sci/Tech'}
+    label_names = [label_mapping[label] for label in df['label']]
+    label_embeddings = model.encode(label_names)
+    
+    # Calculate semantic distance between text and label
+    semantic_distances = []
+    for text_emb, label_emb in zip(text_embeddings, label_embeddings):
+        # Cosine similarity (lower value indicates less semantic alignment)
+        distance = 1 - np.dot(text_emb, label_emb) / (np.linalg.norm(text_emb) * np.linalg.norm(label_emb))
+        semantic_distances.append(distance)
+    
+    # Additional features
+    features = pd.DataFrame({
+        'text_length': df['text'].str.len(),
+        'word_count': df['text'].str.split().str.len(),
+        'semantic_distance': semantic_distances
+    })
+    # Combine all features
+    # Optional: Add TF-IDF features for additional context
+    tfidf = TfidfVectorizer(max_features=50)
+    tfidf_features = tfidf.fit_transform(df['text']).toarray()
+    tfidf_df = pd.DataFrame(
+        tfidf_features, 
+        columns=[f'tfidf_feature_{i}' for i in range(tfidf_features.shape[1])]
+    )
+    
+    # Combine all features
+    final_features = pd.concat([features, tfidf_df], axis=1)
+    
+    return final_features
 
-    # Select numerical features for anomaly detection
-    anomaly_features = ['title_length', 'text_length', 'word_count']
-
-    # Create a new DataFrame with index preserved
-    return df[anomaly_features].reset_index(drop=True)
-
-
-def detect_anomalies_with_multiple_algorithms(data):
+def detect_mislabeled_texts(df, anomaly_data):
     """
-    Apply multiple anomaly detection algorithms
-
+    Detect potentially mislabeled texts using multiple algorithms
+    
     Args:
-        data: Prepared numerical DataFrame
-
+        df: Original DataFrame with labels
+        anomaly_data: Prepared features for anomaly detection
+    
     Returns:
-        Dictionary of anomalous indices for each algorithm
+        Dictionary of potentially mislabeled texts
     """
     # Initialize algorithms
-    hba = HonestyBasedAlgorithm()
-    kba = KLDBasedAlgorithm()
-    vba = VectorBasedAlgorithm()
-
+    hba = HonestyBasedAlgorithm(num_swarm_realizations=400, threshold_c2=0.5)
+    kba = KLDBasedAlgorithm(num_swarm_realizations=400, threshold_c2=0.5)
+    vba = VectorBasedAlgorithm(num_swarm_realizations=400, threshold_c1=0.5, threshold_c2=0.5)
+    
     # Detect anomalies
     anomalies = {
-        'HBA': hba.detect_anomalies(data),
-        'KBA': kba.detect_anomalies(data),
-        'VBA': vba.detect_anomalies(data)
+        'HBA': hba.detect_anomalies(anomaly_data),
+        'KBA': kba.detect_anomalies(anomaly_data),
+        'VBA': vba.detect_anomalies(anomaly_data)
     }
-
-    return anomalies
-
-
-def analyze_anomaly_results(df, anomalies):
-    """
-    Analyze and print anomaly detection results
-
-    Args:
-        df: Original DataFrame
-        anomalies: Dictionary of anomalous indices from different algorithms
-    """
-    print("Anomaly Detection Results:")
-    for algorithm, anomalous_indices in anomalies.items():
-        print(f"\n{algorithm} Anomalies:")
-
-        # Print anomalous entries details
-        anomalous_entries = df.iloc[anomalous_indices]
-        print(f"Number of anomalies detected: {len(anomalous_indices)}")
-
-        # Display first few anomalous entries
-        print("\nSample Anomalous Entries:")
-        print(anomalous_entries[['text']].head())
-
+    
+    # Combine and analyze anomalies
+    mislabeled_candidates = {}
+    
+    for algo, indices in anomalies.items():
+        # Get the anomalous entries
+        anomalous_entries = df.loc[indices]
+        
+        # Group anomalies by label
+        label_anomalies = anomalous_entries.groupby('label').size()
+        
+        print(f"\n{algo} Anomalies by Label:")
+        print(label_anomalies)
+        
+        # Store candidates for further investigation
+        mislabeled_candidates[algo] = anomalous_entries
+    
+    # Find intersection of anomalies across algorithms
+    intersection_anomalies = set(anomalies['HBA']) & set(anomalies['KBA']) & set(anomalies['VBA'])
+    
+    print("\nIntersection of Anomalies:")
+    intersection_df = df.loc[list(intersection_anomalies)]
+    print(intersection_df[['text', 'label']])
+    
+    # Detailed analysis of intersection
+    if not intersection_anomalies:
+        print("No consistent anomalies found across all algorithms.")
+    
+    return {
+        'all_anomalies': anomalies,
+        'intersection_anomalies': intersection_anomalies,
+        'mislabeled_candidates': mislabeled_candidates
+    }
 
 def main():
-    # Synthetic data generation since we don't have actual dataset
-    np.random.seed(42)
-    df_def = pd.DataFrame({
-        'text': [
-            'This is a normal text about technology',
-            'Another regular news article discussing politics',
-            'Extremely long text with repetitive words ' * 10,  # Potential anomaly
-            'Short text',
-            'Normal length text discussing current events',
-            'Very unusual text with strange word patterns ' * 5,  # Potential anomaly
-        ]
-    })
-    
+    # Load dataset
     splits = {'train': 'data/train-00000-of-00001.parquet', 'test': 'data/test-00000-of-00001.parquet'}
     df = pd.read_parquet("hf://datasets/wangrongsheng/ag_news/" + splits["test"])
-
+    
     # Prepare data for anomaly detection
     anomaly_data = prepare_data_for_anomaly_detection(df)
-
-    # Modify each algorithm to use a smaller swarm size range
-    hba = HonestyBasedAlgorithm()
-    kba = KLDBasedAlgorithm()
-    vba = VectorBasedAlgorithm()
-
-    # Modify VBA to use a smaller swarm size range
-    vba_anomalies = vba.detect_anomalies(anomaly_data, swarm_size_range=(2, 5))
-
-    # Analyze results
-    anomalies = {
-        'HBA': hba.detect_anomalies(anomaly_data, swarm_size_range=(2, 5)),
-        'KBA': kba.detect_anomalies(anomaly_data, swarm_size_range=(2, 5)),
-        'VBA': vba_anomalies
-    }
-    analyze_anomaly_results(df, anomalies)
-
+    
+    # Detect potentially mislabeled texts
+    results = detect_mislabeled_texts(df, anomaly_data)
+    
+    # Optional: Export results for further investigation
+    for algo, candidates in results['mislabeled_candidates'].items():
+        candidates.to_csv(f'{algo}_mislabeled_candidates.csv', index=True)
 
 if __name__ == "__main__":
     main()

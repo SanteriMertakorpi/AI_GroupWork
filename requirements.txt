@@ -3,3 +3,6 @@ scipy
 pyarrow
 scikit-learn
 huggingface_hub
+sentence-transformers  
+matplotlib 
+seaborn

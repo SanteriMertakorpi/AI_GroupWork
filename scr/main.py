@@ -1,29 +1,24 @@
-import pandas as pd
-import numpy as np
 from hba import HonestyBasedAlgorithm
 from kba import KLDBasedAlgorithm
 from vba import VectorBasedAlgorithm
+from scipy.stats import entropy
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sentence_transformers import SentenceTransformer
-import seaborn as sns
-from matplotlib_venn import venn3
-from sklearn.decomposition import PCA
-import matplotlib.pyplot as plt
-plt.switch_backend('TkAgg')  # Or 'Qt5Agg', depending on your system
-
-
 
 
 def prepare_data_for_anomaly_detection(df):
     """
-    Prepare dataset for anomaly detection by creating features
-    that capture the semantic relationship between text and label
+    Prepare dataset for anomaly detection with enhanced feature extraction
 
     Args:
         df: Input DataFrame with 'text' and 'label' columns
 
     Returns:
-        DataFrame with features for anomaly detection
+        DataFrame with comprehensive features for anomaly detection
     """
     # Use sentence transformers for semantic embedding
     model = SentenceTransformer('all-MiniLM-L6-v2')
@@ -36,21 +31,36 @@ def prepare_data_for_anomaly_detection(df):
     label_names = [label_mapping[label] for label in df['label']]
     label_embeddings = model.encode(label_names)
 
-    # Calculate semantic distance between text and label
+    # Calculate advanced semantic distances
     semantic_distances = []
-    for text_emb, label_emb in zip(text_embeddings, label_embeddings):
-        # Cosine similarity (lower value indicates less semantic alignment)
-        distance = 1 - np.dot(text_emb, label_emb) / (np.linalg.norm(text_emb) * np.linalg.norm(label_emb))
-        semantic_distances.append(distance)
+    cosine_similarities = []
+    entropy_values = []
 
-    # Additional features
+    for text_emb, label_emb in zip(text_embeddings, label_embeddings):
+        # Cosine similarity and distance
+        cosine_sim = np.dot(text_emb, label_emb) / (np.linalg.norm(text_emb) * np.linalg.norm(label_emb))
+        distance = 1 - cosine_sim
+        semantic_distances.append(distance)
+        cosine_similarities.append(cosine_sim)
+
+        # Entropy of embedding
+        hist, _ = np.histogram(text_emb, bins='auto', density=True)
+        hist = hist + np.finfo(float).eps
+        hist = hist / np.sum(hist)
+        entropy_values.append(entropy(hist))
+
+    # Enhanced features
     features = pd.DataFrame({
         'text_length': df['text'].str.len(),
         'word_count': df['text'].str.split().str.len(),
-        'semantic_distance': semantic_distances
+        'unique_word_ratio': df['text'].apply(lambda x: len(set(x.split())) / len(x.split())),
+        'semantic_distance': semantic_distances,
+        'cosine_similarity': cosine_similarities,
+        'embedding_entropy': entropy_values,
+        'punctuation_ratio': df['text'].apply(lambda x: sum(1 for c in x if c in '.,!?:;') / max(len(x), 1))
     })
-    # Combine all features
-    # Optional: Add TF-IDF features for additional context
+
+    # TF-IDF features
     tfidf = TfidfVectorizer(max_features=50)
     tfidf_features = tfidf.fit_transform(df['text']).toarray()
     tfidf_df = pd.DataFrame(
@@ -61,23 +71,33 @@ def prepare_data_for_anomaly_detection(df):
     # Combine all features
     final_features = pd.concat([features, tfidf_df], axis=1)
 
-    return final_features
+    # Optional: Normalize features
+    from sklearn.preprocessing import StandardScaler
+    scaler = StandardScaler()
+    final_features_scaled = pd.DataFrame(
+        scaler.fit_transform(final_features),
+        columns=final_features.columns,
+        index=df.index
+    )
+
+    return final_features_scaled
+
 
 def detect_mislabeled_texts(df, anomaly_data):
     """
-    Detect potentially mislabeled texts using multiple algorithms
+    Enhanced mislabeled text detection with more robust analysis
 
     Args:
         df: Original DataFrame with labels
         anomaly_data: Prepared features for anomaly detection
 
     Returns:
-        Dictionary of potentially mislabeled texts
+        Dictionary of potentially mislabeled texts with enhanced insights
     """
-    # Initialize algorithms
-    hba = HonestyBasedAlgorithm(num_swarm_realizations=400, threshold_c2=0.01)
-    kba = KLDBasedAlgorithm(num_swarm_realizations=400, threshold_c2=0.01)
-    vba = VectorBasedAlgorithm(num_swarm_realizations=400, threshold_c1=0.01, threshold_c2=0.01)
+    # Initialize algorithms with more sensitive thresholds
+    hba = HonestyBasedAlgorithm(num_swarm_realizations=500, threshold_c2=0.2)
+    kba = KLDBasedAlgorithm(num_swarm_realizations=500, threshold_c2=0.2)
+    vba = VectorBasedAlgorithm(num_swarm_realizations=500, threshold_c1=0.2, threshold_c2=0.2)
 
     # Detect anomalies
     anomalies = {
@@ -93,9 +113,8 @@ def detect_mislabeled_texts(df, anomaly_data):
         # Get the anomalous entries
         anomalous_entries = df.loc[indices]
 
-        # Group anomalies by label
+        # Detailed label-wise analysis
         label_anomalies = anomalous_entries.groupby('label').size()
-
         print(f"\n{algo} Anomalies by Label:")
         print(label_anomalies)
 
@@ -121,63 +140,107 @@ def detect_mislabeled_texts(df, anomaly_data):
 
 
 def visualize_results(df, anomaly_data, results):
-    # Semantic Distance Distribution
-    print("fdsafdasfdas")
-    plt.figure(figsize=(10, 6))
-    sns.histplot(anomaly_data['semantic_distance'], kde=True, bins=30, color='skyblue')
-    plt.title('Distribution of Semantic Distances')
-    plt.xlabel('Semantic Distance')
-    plt.ylabel('Frequency')
-    plt.show()
+    """
+    Visualization that highlights the proportion of normal vs anomalous data
+    """
+    # Identify anomalies
+    intersection_indices = list(results['intersection_anomalies'])
 
-    # Venn Diagram of Anomalies
-    plt.figure(figsize=(8, 8))
-    venn3(
-        [set(results['all_anomalies']['HBA']),
-         set(results['all_anomalies']['KBA']),
-         set(results['all_anomalies']['VBA'])],
-        ('HBA', 'KBA', 'VBA')
+    plt.figure(figsize=(20, 15))
+    plt.suptitle('Anomaly Detection: Normal vs Anomalous Data', fontsize=16)
+
+    # 1. Pie Chart of Anomalies
+    plt.subplot(2, 2, 1)
+    anomaly_counts = {
+        'Normal Data': len(df) - len(intersection_indices),
+        'High-Confidence Anomalies': len(intersection_indices)
+    }
+    plt.pie(
+        anomaly_counts.values(),
+        labels=anomaly_counts.keys(),
+        autopct='%1.1f%%',
+        colors=['lightgreen', 'salmon'],
+        explode=(0, 0.1)
     )
-    plt.title('Overlap of Anomalies Detected by Algorithms')
-    plt.show()
+    plt.title('Proportion of Normal vs Anomalous Data', fontsize=14)
 
-    # PCA Visualization
-    pca = PCA(n_components=2)
-    pca_result = pca.fit_transform(anomaly_data)
-    df['PCA1'], df['PCA2'] = pca_result[:, 0], pca_result[:, 1]
+    # 2. Stacked Bar of Normal vs Anomalous by Label
+    plt.subplot(2, 2, 2)
+    label_mapping = {0: 'World', 1: 'Sports', 2: 'Business', 3: 'Sci/Tech'}
 
-    plt.figure(figsize=(10, 6))
-    sns.scatterplot(x='PCA1', y='PCA2', hue='label', data=df, palette='tab10', alpha=0.6)
-    plt.title('PCA of Text Data with Labels')
-    plt.show()
+    # Prepare data for stacked bar
+    normal_counts = df[~df.index.isin(intersection_indices)]['label'].value_counts()
+    anomaly_counts = df.loc[intersection_indices, 'label'].value_counts()
 
-    # Label-wise Anomaly Count
-    anomaly_counts = {algo: df.loc[indices].groupby('label').size()
-                      for algo, indices in results['all_anomalies'].items()}
-    anomaly_counts_df = pd.DataFrame(anomaly_counts).fillna(0)
+    # Create DataFrame for plotting
+    comparison_df = pd.DataFrame({
+        'Normal': normal_counts,
+        'Anomaly': anomaly_counts
+    }).fillna(0)
+    comparison_df.index = [label_mapping[idx] for idx in comparison_df.index]
 
-    anomaly_counts_df.plot(kind='bar', figsize=(12, 6))
-    plt.title('Anomalies by Label for Each Algorithm')
+    comparison_df.plot(kind='bar', stacked=True, ax=plt.gca(),
+                       color=['lightgreen', 'salmon'])
+    plt.title('Normal vs Anomalous Data by Label', fontsize=14)
     plt.xlabel('Label')
     plt.ylabel('Count')
-    plt.legend(title='Algorithm')
-    plt.show()
+    plt.legend(title='Data Type')
 
-    # Intersection Analysis
-    intersection_indices = list(results['intersection_anomalies'])
-    intersection_df = df.loc[intersection_indices]
+    # 3. Density Plot of Semantic Features
+    plt.subplot(2, 2, 3)
+    plt.title('Semantic Distance Distribution', fontsize=14)
 
-    plt.figure(figsize=(10, 6))
-    sns.scatterplot(
-        x=intersection_df['PCA1'],
-        y=intersection_df['PCA2'],
-        hue=intersection_df['label'],
-        palette='tab10',
-        style=intersection_df['label']  # Change 'style' to be based on 'label' or other appropriate values
+    # Separate normal and anomalous data
+    normal_distances = anomaly_data.loc[~anomaly_data.index.isin(intersection_indices), 'semantic_distance']
+    anomaly_distances = anomaly_data.loc[intersection_indices, 'semantic_distance']
+
+    sns.histplot(
+        normal_distances,
+        label='Normal Data',
+        color='lightgreen',
+        kde=True,
+        alpha=0.6
     )
-    plt.title('Intersection Anomalies Highlighted')
+    sns.histplot(
+        anomaly_distances,
+        label='Anomalies',
+        color='salmon',
+        kde=True,
+        alpha=0.6
+    )
+    plt.xlabel('Semantic Distance')
+    plt.ylabel('Density')
+    plt.legend()
+
+    # 4. Detailed Anomaly Metrics
+    plt.subplot(2, 2, 4)
+    metrics_df = pd.DataFrame({
+        'Metric': ['Total Samples', 'Normal Samples', 'Anomaly Samples'],
+        'Count': [
+            len(df),
+            len(df) - len(intersection_indices),
+            len(intersection_indices)
+        ]
+    })
+    sns.barplot(
+        x='Metric',
+        y='Count',
+        data=metrics_df,
+        palette=['blue', 'lightgreen', 'salmon']
+    )
+    plt.title('Data Sample Composition', fontsize=14)
+    plt.xticks(rotation=45)
+
+    plt.tight_layout()
     plt.show()
 
+    # Print additional statistics
+    print(f"Total Samples: {len(df)}")
+    print(
+        f"Normal Samples: {len(df) - len(intersection_indices)} ({(1 - len(intersection_indices) / len(df)) * 100:.2f}%)")
+    print(f"Anomaly Samples: {len(intersection_indices)} ({len(intersection_indices) / len(df) * 100:.2f}%)")
+
+    return results
 
 def main():
     # Load dataset

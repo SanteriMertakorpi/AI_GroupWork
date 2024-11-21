@@ -6,3 +6,4 @@ huggingface_hub
 sentence-transformers  
 matplotlib 
 seaborn
+pandas

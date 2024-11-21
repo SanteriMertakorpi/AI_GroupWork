@@ -77,23 +77,29 @@ class HonestyBasedAlgorithm:
         k = np.linalg.solve(U,y)
 
         return k
-    
-    def detect_anomalies(self, meter_data, swarm_size_range=(5,10)):
+
+    def detect_anomalies(self, meter_data, swarm_size_range=(5, 10)):
         """
         Detect anomalous meters using HBA
 
         Args:
             meter_data: DataFrame with meter readings (meters as rows, readings as columns)
             swarm_size_range: Tuple of (min, max) swarm size
-        
+
         Returns:
             List of meter IDs flagged as anomalous
         """
-
         num_meters = len(meter_data)
+
+        # Adjust swarm size range if it exceeds available meters
+        swarm_size_range = (
+            min(swarm_size_range[0], num_meters),
+            min(swarm_size_range[1], num_meters)
+        )
+
         meter_flags = np.zeros((num_meters, self.num_swarmn_realizations))
 
-        # Calculate total consumption for virtual collector calucaltions
+        # Calculate total consumption for virtual collector calculations
         total_consumption = meter_data.sum()
 
         # Perform multiple swarm realizations
@@ -111,22 +117,21 @@ class HonestyBasedAlgorithm:
                 honesty_coefficients = self.calculate_honesty_coefficients(swarm, virtual_collector)
 
                 # Flag meters with suspicious honesty coefficients
-                # Values significantlu different from 1 indicate potential anomalies
                 for i, meter_id in enumerate(selected_meters):
-                    if abs(honesty_coefficients[i] - 1.0) > 0.3: # Threshold can be adjusted
+                    if abs(honesty_coefficients[i] - 1.0) > 0.3:
                         meter_flags[meter_data.index.get_loc(meter_id), j] = 1
             except np.linalg.LinAlgError:
                 # Skip this swarm if matrix is singular
                 continue
 
-            # Final anomaly decisions
-            flag_sums = np.sum(meter_flags, axis=1)
-            max_flags = np.max(flag_sums)
-            anomalous_meters = []
+        # Final anomaly decisions
+        flag_sums = np.sum(meter_flags, axis=1)
+        max_flags = np.max(flag_sums)
+        anomalous_meters = []
 
-            for i in range(num_meters):
-                if flag_sums[i] > max_flags * self.threshold_c2:
-                    anomalous_meters.append(meter_data.index[i])
-            
-            return anomalous_meters
+        for i in range(num_meters):
+            if flag_sums[i] > max_flags * self.threshold_c2:
+                anomalous_meters.append(meter_data.index[i])
+
+        return anomalous_meters
     

@@ -54,23 +54,30 @@ class VectorBasedAlgorithm:
         entro = entropy(hist)
 
         return mean, entro
-    
-    def detect_anomalies(self, meter_data):
+
+    def detect_anomalies(self, meter_data, swarm_size_range=(5, 10)):
         """
         Detect anomalous meters with VBA
 
         Args:
             meter_data: Dataframe with meter readings (meters = rows, readings = columns)
-        
+            swarm_size_range: Tuple of (min, max) swarm size
+
         Returns:
             List of meter IDs flagged as anomalous
         """
-
         num_meters = len(meter_data)
+
+        # Adjust swarm size range if it exceeds available meters
+        swarm_size_range = (
+            min(swarm_size_range[0], num_meters),
+            min(swarm_size_range[1], num_meters)
+        )
+
         meter_flags = np.zeros((num_meters, self.num_swarm_realization))
 
         for j in range(self.num_swarm_realization):
-            swarm = self.form_random_swarm(meter_data)
+            swarm = self.form_random_swarm(meter_data, swarm_size_range)
 
             average_consumption = swarm.mean()
 
@@ -81,22 +88,23 @@ class VectorBasedAlgorithm:
                 meter_mean, meter_entropy = self.calculate_metrics(meter_readings)
 
                 deviation = np.sqrt(
-                    (center_mean - meter_mean)**2 +
-                    (center_entropy - meter_entropy)**2
+                    (center_mean - meter_mean) ** 2 +
+                    (center_entropy - meter_entropy) ** 2
                 )
 
-                deviations.append((idx,deviation))
-            
+                deviations.append((idx, deviation))
+
             max_deviation = max(dev for _, dev in deviations)
             for idx, deviation in deviations:
                 if deviation > max_deviation * self.threshold_c1:
-                    meter_flags[meter_data.index.get_loc(idx), j] =1
+                    meter_flags[meter_data.index.get_loc(idx), j] = 1
+
         flag_sums = np.sum(meter_flags, axis=1)
         max_flags = np.max(flag_sums)
         anomalous_meters = []
 
-        for i in range (num_meters):
+        for i in range(num_meters):
             if flag_sums[i] > max_flags * self.threshold_c2:
                 anomalous_meters.append(meter_data.index[i])
-        
+
         return anomalous_meters

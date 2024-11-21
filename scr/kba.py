@@ -56,54 +56,60 @@ class KLDBasedAlgorithm:
         
         # Calculate KL distance
         return np.sum(p * np.log(p / q))
-    
+
     def detect_anomalies(self, meter_data, swarm_size_range=(5, 10)):
         """
         Detect anomalous meters using KBA
-        
+
         Args:
             meter_data: DataFrame with meter readings (meters as rows, readings as columns)
             swarm_size_range: Tuple of (min, max) swarm size
-            
+
         Returns:
             List of meter IDs flagged as anomalous
         """
         num_meters = len(meter_data)
+
+        # Adjust swarm size range if it exceeds available meters
+        swarm_size_range = (
+            min(swarm_size_range[0], num_meters),
+            min(swarm_size_range[1], num_meters)
+        )
+
         meter_flags = np.zeros((num_meters, self.num_swarm_realizations))
-        
+
         # Perform multiple swarm realizations
         for j in range(self.num_swarm_realizations):
             # Form random swarm
             swarm_size = np.random.randint(swarm_size_range[0], swarm_size_range[1])
             selected_meters = np.random.choice(meter_data.index, size=swarm_size, replace=False)
             swarm = meter_data.loc[selected_meters]
-            
+
             # Calculate average consumption for swarm
             avg_consumption = swarm.mean()
-            
+
             # Calculate probability distribution of average consumption
             avg_dist = self.calculate_probability_distribution(avg_consumption)
-            
+
             # Calculate KL distances for each meter in swarm
             for meter_idx, meter_id in enumerate(selected_meters):
                 # Calculate meter's individual distribution
                 meter_dist = self.calculate_probability_distribution(swarm.iloc[meter_idx])
-                
+
                 # Calculate KL distance
                 kl_distance = self.kullback_leibler_distance(meter_dist, avg_dist)
-                
+
                 # Flag meters with large KL distances
                 if kl_distance > 1.0:  # Threshold can be adjusted
                     meter_flags[meter_data.index.get_loc(meter_id), j] = 1
-        
+
         # Make final anomaly decisions
         flag_sums = np.sum(meter_flags, axis=1)
         max_flags = np.max(flag_sums)
         anomalous_meters = []
-        
+
         for i in range(num_meters):
             if flag_sums[i] > max_flags * self.threshold_c2:
                 anomalous_meters.append(meter_data.index[i])
-                
-        return anomalous_meters
 
+        return anomalous_meters

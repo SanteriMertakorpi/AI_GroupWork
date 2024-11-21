@@ -2,3 +2,4 @@ numpy
 scipy
 pyarrow
 scikit-learn
+huggingface_hub

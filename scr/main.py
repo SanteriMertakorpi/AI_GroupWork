@@ -5,6 +5,7 @@ from kba import KLDBasedAlgorithm
 from vba import VectorBasedAlgorithm
 
 
+
 def prepare_data_for_anomaly_detection(df):
     """
     Prepare dataset for anomaly detection by converting text features
@@ -77,7 +78,7 @@ def analyze_anomaly_results(df, anomalies):
 def main():
     # Synthetic data generation since we don't have actual dataset
     np.random.seed(42)
-    df = pd.DataFrame({
+    df_def = pd.DataFrame({
         'text': [
             'This is a normal text about technology',
             'Another regular news article discussing politics',
@@ -87,6 +88,9 @@ def main():
             'Very unusual text with strange word patterns ' * 5,  # Potential anomaly
         ]
     })
+    
+    splits = {'train': 'data/train-00000-of-00001.parquet', 'test': 'data/test-00000-of-00001.parquet'}
+    df = pd.read_parquet("hf://datasets/wangrongsheng/ag_news/" + splits["test"])
 
     # Prepare data for anomaly detection
     anomaly_data = prepare_data_for_anomaly_detection(df)
